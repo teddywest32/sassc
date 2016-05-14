@@ -2,6 +2,9 @@
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS 1
 #endif
+#ifndef _CRT_NONSTDC_NO_WARNINGS
+#define _CRT_NONSTDC_NO_WARNINGS 1
+#endif
 #endif
 
 #include <stdio.h>
@@ -19,8 +22,9 @@
 #endif
 
 #ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
 #include <windows.h>
-
 int get_argv_utf8(int* argc_ptr, char*** argv_ptr) {
   int argc;
   char** argv;
@@ -52,7 +56,7 @@ int output(int error_status, const char* error_message, const char* output_strin
         return 1;
     } else if (output_string) {
         if(outfile) {
-            FILE* fp = fopen(outfile, "w");
+            FILE* fp = fopen(outfile, "wb");
             if(!fp) {
                 perror("Error opening output file");
                 return 1;
@@ -65,6 +69,9 @@ int output(int error_status, const char* error_message, const char* output_strin
             fclose(fp);
         }
         else {
+            #ifdef _WIN32
+              setmode(fileno(stdout), O_BINARY);
+            #endif
             printf("%s", output_string);
         }
         return 0;
@@ -164,10 +171,11 @@ struct
 #define NUM_STYLE_OPTION_STRINGS \
     sizeof(style_option_strings) / sizeof(style_option_strings[0])
 
-void print_version(char* argv0) {
+void print_version() {
     printf("sassc: %s\n", SASSC_VERSION);
     printf("libsass: %s\n", libsass_version());
     printf("sass2scss: %s\n", sass2scss_version());
+    printf("sass: %s\n", libsass_language_version());
 }
 
 void print_usage(char* argv0) {
@@ -210,11 +218,10 @@ int main(int argc, char** argv) {
     bool generate_source_map = false;
     struct Sass_Options* options = sass_make_options();
     sass_option_set_output_style(options, SASS_STYLE_NESTED);
-    char *include_paths = NULL;
-    char *plugin_paths = NULL;
     sass_option_set_precision(options, 5);
 
-    int c, i;
+    int c;
+    size_t i;
     int long_index = 0;
     static struct option long_options[] =
     {
@@ -237,32 +244,10 @@ int main(int argc, char** argv) {
             from_stdin = 1;
             break;
         case 'I':
-            if (!include_paths) {
-#ifdef _MSC_VER
-				include_paths = _strdup(optarg);
-#else
-				include_paths = strdup(optarg);
-#endif
-            } else {
-                char *old_paths = include_paths;
-                include_paths = malloc(strlen(old_paths) + 1 + strlen(optarg) + 1);
-                sprintf(include_paths, "%s%c%s", old_paths, PATH_SEP, optarg);
-                free(old_paths);
-            }
+            sass_option_push_include_path(options, strdup(optarg));
             break;
         case 'P':
-            if (!plugin_paths) {
-#ifdef _MSC_VER
-				plugin_paths = _strdup(optarg);
-#else
-				plugin_paths = strdup(optarg);
-#endif
-            } else {
-                char *old_paths = plugin_paths;
-                plugin_paths = malloc(strlen(old_paths) + 1 + strlen(optarg) + 1);
-                sprintf(plugin_paths, "%s%c%s", old_paths, PATH_SEP, optarg);
-                free(old_paths);
-            }
+            sass_option_push_plugin_path(options, strdup(optarg));
             break;
         case 't':
             for(i = 0; i < NUM_STYLE_OPTION_STRINGS; ++i) {
@@ -294,7 +279,7 @@ int main(int argc, char** argv) {
             if (sass_option_get_precision(options) < 0) sass_option_set_precision(options, 5);
             break;
         case 'v':
-            print_version(argv[0]);
+            print_version();
             return 0;
         case 'h':
             print_usage(argv[0]);
@@ -308,9 +293,6 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
-
-    sass_option_set_include_path(options, include_paths ? include_paths : "");
-    sass_option_set_plugin_path(options, plugin_paths ? plugin_paths : "");
 
     if(optind < argc - 2) {
         fprintf(stderr, "Error: Too many arguments.\n");
@@ -336,9 +318,6 @@ int main(int argc, char** argv) {
         }
         result = compile_stdin(options, outfile);
     }
-
-    free(include_paths);
-    free(plugin_paths);
 
     return result;
 }
